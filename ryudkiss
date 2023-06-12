@@ -1,0 +1,171 @@
+import os
+import tabula
+from pptx import Presentation
+from pptx.util import Inches
+from tkinter import Tk, filedialog, messagebox
+from tkinter.ttk import Progressbar
+from tkinter import Label, Button, Frame, Listbox, Scrollbar, Toplevel
+from tqdm import tqdm
+
+def create_presentation(file_paths, table_selection):
+    prs = Presentation()
+
+    # Iterate through each selected PDF file
+    for file_path in tqdm(file_paths, desc="Processing PDFs", unit="file"):
+        try:
+            filename = os.path.basename(file_path)
+            file_name = os.path.splitext(filename)[0].title()
+
+            # Read the PDF and extract tables using Tabula
+            tables = tabula.read_pdf(file_path, pages='all')
+
+            # Select tables based on the chosen method
+            if table_selection == 'range':
+                table_range = input(f"Enter table range for {filename}: ")
+                table_indices = parse_table_range(table_range)
+                selected_tables = [tables[i] for i in table_indices]
+            else:
+                selected_tables = select_tables_gui(tables)
+
+            # Iterate through each extracted table and add it to a new PowerPoint slide
+            for table in selected_tables:
+                slide = prs.slides.add_slide(prs.slide_layouts[1])
+
+                # Set the slide title to the file name
+                slide.shapes.title.text = file_name
+
+                # Add table to the slide
+                tbl = slide.shapes.add_table(
+                    rows=len(table),
+                    cols=len(table.columns),
+                    left=Inches(1),
+                    top=Inches(1),
+                    width=Inches(8),
+                    height=Inches(5)
+                ).table
+
+                # Populate the table with data
+                for i, row in enumerate(table.itertuples(index=False)):
+                    for j, value in enumerate(row):
+                        tbl.cell(i, j).text = str(value)
+
+        except Exception as e:
+            messagebox.showwarning("Table Extraction Error",
+                                   f"Error occurred while extracting tables from {filename}:\n{str(e)}")
+
+    return prs
+
+
+def parse_table_range(table_range):
+    # Parse the table range string and return a list of table indices
+    indices = []
+    ranges = table_range.split(',')
+
+    for rng in ranges:
+        if '-' in rng:
+            start, end = rng.split('-')
+            indices.extend(range(int(start)-1, int(end)))
+        else:
+            indices.append(int(rng)-1)
+
+    return indices
+
+
+def select_tables_gui(tables):
+    selected_tables = []
+
+    def add_table():
+        selected_table = table_listbox.get(table_listbox.curselection())
+        selected_tables.append(tables[selected_table])
+        selected_table_label.config(text=f"Selected Tables: {len(selected_tables)}")
+
+    def remove_table():
+        selected_table = table_listbox.get(table_listbox.curselection())
+        selected_tables.remove(tables[selected_table])
+        selected_table_label.config(text=f"Selected Tables: {len(selected_tables)}")
+
+    def done():
+        root.quit()
+
+    root = Tk()
+    root.title("Table Selection")
+
+    frame = Frame(root)
+    frame.pack(pady=10)
+
+    table_listbox = Listbox(frame, width=50, selectmode="extended")
+    table_listbox.pack(side="left", fill="y")
+
+    scrollbar = Scrollbar(frame, orient="vertical")
+    scrollbar.pack(side="right", fill="y")
+
+    table_listbox.config(yscrollcommand=scrollbar.set)
+    scrollbar.config(command=table_listbox.yview)
+
+    for i, table in enumerate(tables):
+        table_listbox.insert("end", f"Table {i+1}")
+
+    button_frame = Frame(root)
+    button_frame.pack(pady=10)
+
+    add_button = Button(button_frame, text="Add Table", command=add_table)
+    add_button.grid(row=0, column=0, padx=10)
+
+    remove_button = Button(button_frame, text="Remove Table", command=remove_table)
+    remove_button.grid(row=0, column=1, padx=10)
+
+    selected_table_label = Label(root, text="Selected Tables: 0")
+    selected_table_label.pack(pady=10)
+
+    done_button = Button(root, text="Done", command=done)
+    done_button.pack(pady=10)
+
+    root.mainloop()
+
+    return selected_tables
+
+
+def main():
+    # Initialize Tkinter
+    root = Tk()
+    root.withdraw()
+
+    # Prompt the user to select the PDF files
+    file_paths = filedialog.askopenfilenames(title="Select PDF files", filetypes=[("PDF Files", "*.pdf")])
+
+    if len(file_paths) == 0:
+        messagebox.showwarning("Warning", "No PDF files selected.")
+        return
+
+    # Ask the user for table selection method
+    selection_method = messagebox.askquestion("Table Selection", "How would you like to select tables?",
+                                              icon='question')
+    if selection_method == 'yes':
+        table_selection = 'range'
+    else:
+        table_selection = 'gui'
+
+    try:
+        # Create output directory if it doesn't exist
+        output_dir = os.path.dirname(file_paths[0])
+        os.makedirs(output_dir, exist_ok=True)
+
+        # Set output PowerPoint file name
+        output_pptx = 'output.pptx'
+
+        # Create the presentation
+        prs = create_presentation(file_paths, table_selection)
+
+        # Save the PowerPoint presentation in the output directory
+        prs.save(os.path.join(output_dir, output_pptx))
+
+        messagebox.showinfo("Success", "PowerPoint presentation created successfully!")
+
+    except Exception as e:
+        messagebox.showwarning("Error", f"An error occurred during PowerPoint presentation creation:\n{str(e)}")
+
+    root.destroy()
+
+
+if __name__ == "__main__":
+    main()
